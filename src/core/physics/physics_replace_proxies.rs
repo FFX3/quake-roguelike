@@ -83,7 +83,6 @@ pub fn physics_replace_proxies(
                     commands
                         .entity(entity)
                         .insert(rapier_collider)
-                        // FIXME: this is just for demo purposes !!!
                         .insert(
                             ActiveCollisionTypes::default()
                                 | ActiveCollisionTypes::KINEMATIC_STATIC
@@ -91,9 +90,6 @@ pub fn physics_replace_proxies(
                                 | ActiveCollisionTypes::DYNAMIC_STATIC,
                         )
                         .insert(ActiveEvents::COLLISION_EVENTS);
-                    //  .insert(ActiveEvents::COLLISION_EVENTS)
-                    // break;
-                    // RapierCollider::convex_hull(points)
                 }
             }
         }

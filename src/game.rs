@@ -1,8 +1,7 @@
 use crate::insert_dependant_component;
-use bevy::prelude::*;
+use bevy::{prelude::*, input::mouse::MouseMotion};
 use bevy_rapier3d::prelude::*;
-
-// this file is just for demo purposes, contains various types of components, systems etc
+use bevy::transform::components::Transform;
 
 #[derive(Component, Reflect, Default, Debug)]
 #[reflect(Component)]
@@ -18,8 +17,10 @@ pub enum SoundMaterial {
 
 #[derive(Component, Reflect, Default, Debug)]
 #[reflect(Component)]
-/// Demo marker component
 pub struct Player;
+#[derive(Component, Reflect, Default, Debug)]
+#[reflect(Component)]
+pub struct PlayerCamera;
 
 #[derive(Component, Reflect, Default, Debug)]
 #[reflect(Component)]
@@ -36,50 +37,86 @@ pub struct Interactible;
 /// Demo marker component
 pub struct Pickable;
 
-#[derive(Component, Reflect, Default, Debug)]
-#[reflect(Component)]
-pub struct Initialized;
-
 fn player_move_demo(
     keycode: Res<Input<KeyCode>>,
-    mut players: Query<&mut Transform, With<Player>>,
+    mut players_query: Query<&mut Transform, With<Player>>,
+    mut player_cameras_query: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
+    mut ev_motion: EventReader<MouseMotion>,
+    primary_window: Query<&Window>,
 ) {
-    let speed = 0.2;
-    if let Ok(mut player) = players.get_single_mut() {
-        if keycode.pressed(KeyCode::Left) {
-            player.translation.x += speed;
-        }
-        if keycode.pressed(KeyCode::Right) {
-            player.translation.x -= speed;
-        }
+    let player_result = players_query.get_single_mut();
+    if player_result.is_err() { return; }
+    let player_camera_result = player_cameras_query.get_single_mut();
+    if player_camera_result.is_err() { return; }
+    let primary_window_result = primary_window.get_single();
+    if player_camera_result.is_err() { return; }
 
-        if keycode.pressed(KeyCode::Up) {
-            player.translation.z += speed;
-        }
-        if keycode.pressed(KeyCode::Down) {
-            player.translation.z -= speed;
-        }
+    let window = primary_window_result.unwrap();
+    let mut player = player_result.unwrap();
+    let mut player_camera = player_camera_result.unwrap();
+
+    let speed = 0.2;
+
+    let f = player_camera.forward();
+    let bearing_vector = Vec3::new(f.x, 0.0, f.z).normalize();
+    if keycode.pressed(KeyCode::W) {
+        player.translation += speed * bearing_vector;
     }
+
+    if keycode.pressed(KeyCode::A) {
+        player.translation += Vec3::new(bearing_vector.z, 0.0, bearing_vector.x * -1.0) * speed;
+    }
+
+    if keycode.pressed(KeyCode::D) {
+        player.translation += Vec3::new(bearing_vector.z * -1.0, 0.0, bearing_vector.x) * speed;
+    }
+
+    if keycode.pressed(KeyCode::S) {
+        player.translation += speed * bearing_vector * -1.0;
+    }
+
+    for ev in ev_motion.iter() {
+        let (mut yaw, mut pitch, _) = player_camera.rotation.to_euler(EulerRot::YXZ);
+        // Using smallest of height or width ensures equal vertical and horizontal sensitivity
+        let window_scale = window.height().min(window.width());
+        pitch -= (1.0 * ev.delta.y * window_scale / 1000.0).to_radians();
+        yaw -= (1.0 * ev.delta.x * window_scale / 1000.0).to_radians();
+
+        pitch = pitch.clamp(-1.54, 1.54);
+
+        // Order is important to prevent unintended roll
+        player_camera.rotation =
+            Quat::from_axis_angle(Vec3::Y, yaw) * Quat::from_axis_angle(Vec3::X, pitch);
+    }
+
+
 }
 
 fn configure_player_entity(
     mut commands: Commands,
-    mut query: Query<Entity, (With<Player>, Without<Initialized>)>,
+    mut query: Query<(Entity, &mut Transform), Added<Player>>,
 ) {
-
     let entity_result = query.get_single_mut();
 
     if entity_result.is_err() { return; }
-    let entity = entity_result.unwrap();
-    
+    let (entity, transform) = entity_result.unwrap();
+
+
+    println!("player found, initializing");
+
     commands.entity(entity)
         .insert(RigidBody::Dynamic)
+        .insert(LockedAxes::ROTATION_LOCKED)
         .insert(AdditionalMassProperties::Mass(10.0))
         .insert(ExternalForce {
             force: Vec3::new(0.0, 0.0, 30.0),
             torque: Vec3::ZERO,
         })
-        .insert(Initialized);
+        .with_children(|parent| {
+            parent
+                .spawn(Camera3dBundle::default())
+                .insert(PlayerCamera);
+        });
 }
 
 // collision tests/debug
@@ -111,7 +148,7 @@ impl Plugin for DemoPlugin {
             .register_type::<Pickable>()
             .register_type::<SoundMaterial>()
             .register_type::<Player>()
-            .register_type::<Initialized>()
+            .register_type::<PlayerCamera>()
             // little helper utility, to automatically inject components that are dependant on an other component
             // ie, here an Entity with a Player component should also always have a ShouldBeWithPlayer component
             // you get a warning if you use this, as I consider this to be stop-gap solution (usually you should have either a bundle, or directly define all needed components)
